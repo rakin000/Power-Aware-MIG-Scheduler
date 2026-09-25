@@ -1,0 +1,4 @@
+HPCG benchmark input file
+Custom dat file to have a short execution time (~30s)
+64 64 64
+30
