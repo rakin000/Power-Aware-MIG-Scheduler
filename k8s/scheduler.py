@@ -1,4 +1,4 @@
-import time
+import re, time
 from dataclasses import dataclass, field
 
 DEFAULT_GPU_RESOURCE = 'nvidia.com/gpu'
@@ -9,12 +9,17 @@ class PodJob:
     `gpu_resource`/`gpu_count` say what to request in `resources.limits` — a whole GPU
     (the default) for time-slicing, or a MIG profile such as 'nvidia.com/mig-1g.10gb' for
     MIG experiments (see KubectlWrapper.get_mig_resources() to discover what a node offers).
+    `name` is normalized to a valid Pod/container name (RFC 1123 label), e.g. 'gpu_burn-0' ->
+    'gpu-burn-0', since workload names like 'gpu_burn' contain characters Kubernetes rejects.
     """
     name: str
     workload: object              # a WorkloadAgent (workloads/workload_agent.py)
     kwargs: dict = field(default_factory=dict)
     gpu_resource: str = DEFAULT_GPU_RESOURCE
     gpu_count: int = 1
+
+    def __post_init__(self):
+        self.name = re.sub(r'[^a-z0-9-]+', '-', self.name.lower()).strip('-')[:63]
 
 class KubernetesScheduler(object):
     """Drives a batch of PodJobs for one experiment condition: build manifests, apply,

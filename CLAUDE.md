@@ -21,8 +21,13 @@ There is no build step, linter, or test suite. Provisioning (from a fresh Lambda
 ```bash
 ./init/setup.sh       # docker + nvidia-container-toolkit + dcgm-exporter + benchmark images
 ./init/k8s.sh          # single-node minikube + NVIDIA GPU Operator
-./init/mig.sh enable   # enable MIG mode on every GPU (only needed for exp-mig-k8s.py)
+./init/mig.sh enable   # enable MIG mode on every GPU (only needed for exp-mig-k8s.py; may need a reboot)
+./init/mig.sh create   # create MIG instances + restart minikube (again after every reboot)
 ```
+GPUs are advertised to pods by minikube's `nvidia-device-plugin` addon (not the GPU Operator's
+device plugin); `k8s.sh`/`mig.sh create` set its `MIG_STRATEGY=mixed` so MIG instances show up
+as `nvidia.com/mig-<profile>` resources. minikube must be restarted after (re)partitioning, since
+its container only sees the MIG device nodes that existed when it started.
 
 Running an experiment (each is standalone, invoked directly with `python3` from the repo root):
 ```bash
@@ -65,7 +70,7 @@ by concrete classes, imported via each package's `__init__.py`:
 
 Each top-level `exp-*.py` script composes these three packages: it uses `KubectlWrapper` to set
 up the cluster for one experiment condition (oversubscription policy, or nothing extra for MIG
-since profiles are already exposed by the GPU Operator once MIG mode is on), starts a
+since profiles are already exposed by the device plugin once `mig.sh create` has run), starts a
 `MonitorWrapper`, sweeps a grid of conditions (updating monitor labels between them), and for
 each condition builds a batch of `PodJob`s and hands them to `KubernetesScheduler.run()`, which
 blocks until they finish before the script moves to the next condition.

@@ -42,4 +42,4 @@ docker run -d --gpus all --cap-add SYS_ADMIN --name dcgm-exporter --rm -p 9400:9
 mkdir -p bench-res data
 
 echo "Setup done. Next: ./init/k8s.sh                 (single-node Kubernetes cluster)"
-echo "      then, optionally: ./init/mig.sh enable    (MIG experiments; ./init/mig.sh disable for time-slicing)"
+echo "      then, optionally: ./init/mig.sh enable && ./init/mig.sh create   (MIG experiments; ./init/mig.sh disable for time-slicing)"

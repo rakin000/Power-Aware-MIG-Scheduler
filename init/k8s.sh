@@ -2,15 +2,13 @@
 # Single-node Kubernetes (minikube + NVIDIA GPU operator) on a Lambda instance, shared by all
 # three exp-*.py scripts. Run ./init/setup.sh first.
 # Time-slicing (exp-timeslices.py, exp-perf-timeslice-k8s.py) needs MIG disabled (./init/mig.sh disable);
-# the MIG sweep (exp-mig-k8s.py) needs it enabled (./init/mig.sh enable) — the mig.strategy=mixed set
-# below is what lets the device plugin expose per-profile nvidia.com/mig-* resources once it is.
+# the MIG sweep (exp-mig-k8s.py) needs it enabled and partitioned (./init/mig.sh enable, then create) —
+# the MIG_STRATEGY=mixed set below is what lets the device plugin expose per-profile
+# nvidia.com/mig-* resources once it is.
+# GPU metrics on :9400 come from the standalone dcgm-exporter container started by setup.sh.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# minikube owns the GPUs' metrics endpoint from here on: the operator's dcgm-exporter
-# replaces the standalone container on :9400
-docker rm -f dcgm-exporter >/dev/null 2>&1 || true
 
 if ! command -v minikube >/dev/null; then
     curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube_latest_amd64.deb
@@ -34,9 +32,9 @@ helm install gpuo nvidia/gpu-operator --namespace kube-system \
 eval "$(minikube docker-env)"
 "$HERE/build-images.sh"
 
-echo "Waiting for the operator's dcgm-exporter pod..."
-until minikube kubectl -- get pods -n gpu-operator -l app=nvidia-dcgm-exporter -o name 2>/dev/null | grep -q pod; do sleep 10; done
-POD_NAME=$(minikube kubectl -- get pods -n gpu-operator -l app=nvidia-dcgm-exporter -o jsonpath='{.items[0].metadata.name}')
-minikube kubectl -- -n gpu-operator wait --for=condition=Ready pod/"$POD_NAME" --timeout=600s
-nohup minikube kubectl -- -n gpu-operator port-forward pod/"$POD_NAME" 9400:9400 > /dev/null 2>&1 &
-echo "Ready: DCGM metrics forwarded on :9400."
+# GPUs are advertised by minikube's nvidia-device-plugin addon (enabled by --gpus all), whose
+# default MIG strategy (none) hides MIG instances; mixed exposes one resource per profile
+# (nvidia.com/mig-1g.5gb, ...) and still plain nvidia.com/gpu when MIG is off. Persists across
+# minikube stop/start.
+minikube kubectl -- -n kube-system set env daemonset/nvidia-device-plugin-daemonset MIG_STRATEGY=mixed
+echo "Ready. For MIG experiments: ./init/mig.sh enable (once), then ./init/mig.sh create"

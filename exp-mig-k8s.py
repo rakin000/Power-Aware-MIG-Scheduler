@@ -27,7 +27,7 @@ def sweep_mig_profiles(kubectl_wrapper, scheduler, monitors_wrapper):
 
     mig_profiles = kubectl_wrapper.get_mig_resources()
     if not mig_profiles:
-        print('No MIG resources advertised by the cluster (is MIG mode enabled? see init/mig.sh)')
+        print('No MIG resources advertised by the cluster (MIG mode enabled and instances created? see init/mig.sh)')
         sys.exit(-1)
     print('MIG profiles found:', mig_profiles)
 
