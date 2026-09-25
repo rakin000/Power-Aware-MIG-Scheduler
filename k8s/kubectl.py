@@ -112,9 +112,9 @@ data:
 
     def get_mig_resources(self, node: str = None) -> dict:
         """Subset of get_allocatable_gpu_resources() restricted to MIG profile resources
-        (nvidia.com/mig-<profile>, e.g. 'nvidia.com/mig-1g.10gb'), as exposed by the GPU
-        Operator's device plugin once the node's MIG mode is enabled and its strategy is
-        'mixed' (see init/mig.sh and init/k8s.sh).
+        (nvidia.com/mig-<profile>, e.g. 'nvidia.com/mig-1g.10gb'), as exposed by the device
+        plugin once the node's MIG instances exist and its strategy is 'mixed' (see
+        init/mig.sh and init/minikube-gpu.sh).
         """
         return {name: count for name, count in self.get_allocatable_gpu_resources(node).items()
                 if name.startswith('nvidia.com/mig-')}

@@ -7,8 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Power-Aware MIG Scheduler: a Kubernetes-based framework for running GPU-sharing experiments
 (NVIDIA MIG partitioning, GPU time-slicing) on a Lambda.ai A100/H100 instance, and collecting
 per-condition power/performance metrics (DCGM, IPMI, CPU) while doing it. It targets a
-**single-node** cluster: one Lambda VM running minikube + the NVIDIA GPU Operator. It has no
-figure-generation or paper-artifact code — it only drives the cluster and writes raw CSVs.
+**single-node** cluster: one Lambda VM running minikube with its NVIDIA device plugin addon (no
+GPU Operator). It also places MIG workloads through the sibling `../GPU_Power_Model` repo's
+power-overload predictor, run as a kube-scheduler extender. It has no figure-generation or
+paper-artifact code — it only drives the cluster and writes raw CSVs.
 
 Everything here is pure-stdlib Python (`subprocess`, `threading`, `json`, ...); there is no
 `requirements.txt` and nothing to `pip install` to run it. What it does need at runtime:
@@ -20,21 +22,30 @@ and (for MIG experiments) MIG mode enabled on the node's GPUs.
 There is no build step, linter, or test suite. Provisioning (from a fresh Lambda instance):
 ```bash
 ./init/setup.sh       # docker + nvidia-container-toolkit + dcgm-exporter + benchmark images
-./init/k8s.sh          # single-node minikube + NVIDIA GPU Operator
-./init/mig.sh enable   # enable MIG mode on every GPU (only needed for exp-mig-k8s.py; may need a reboot)
+./init/k8s.sh          # single-node minikube + its NVIDIA device plugin addon
+./init/mig.sh enable   # enable MIG mode on every GPU (MIG experiments only; may need a reboot)
 ./init/mig.sh create   # create MIG instances + restart minikube (again after every reboot)
+./init/power-scheduler.sh  # GPU Power Model extender + `power-aware-scheduler` kube-scheduler
 ```
-GPUs are advertised to pods by minikube's `nvidia-device-plugin` addon (not the GPU Operator's
-device plugin); `k8s.sh`/`mig.sh create` set its `MIG_STRATEGY=mixed` so MIG instances show up
-as `nvidia.com/mig-<profile>` resources. minikube must be restarted after (re)partitioning, since
-its container only sees the MIG device nodes that existed when it started.
+GPUs are advertised to pods by minikube's `nvidia-device-plugin` addon. The GPU Operator must
+not be installed: its toolkit switches minikube's docker to a CDI runtime that can't resolve
+individual devices, and it deletes the addon's daemonset (same name). `init/minikube-gpu.sh`
+(run by `k8s.sh` and `mig.sh create`) makes MIG work inside the minikube node — full
+`/proc/driver/nvidia` bind mount, legacy runtime mode, privileged plugin with
+`MIG_STRATEGY=mixed` — and must be re-run after every `minikube start` (the mount doesn't
+persist). minikube must also be restarted after (re)partitioning, since its container only sees
+the MIG device nodes that existed when it started. dcgm-exporter must run with `-c 1000`
+(1 s refresh), or per-second samples repeat one stale value.
 
 Running an experiment (each is standalone, invoked directly with `python3` from the repo root):
 ```bash
 python3 exp-timeslices.py            # time-slicing, worst-case power (gpu_burn)
 python3 exp-perf-timeslice-k8s.py    # time-slicing, performance (Blender/HPCG/Llama/YOLO)
 python3 exp-mig-k8s.py               # MIG partitioning, worst-case power (gpu_burn)
+python3 exp-power-model-k8s.py       # MIG: run + monitor solo, schedule via GPU Power Model, print decisions
 ```
+The time-slicing scripts still configure oversubscription via the GPU Operator's ClusterPolicy,
+so they don't work on the current (operator-less) setup.
 Each does `from monitoring import *`, `from k8s import *`, `from workloads import *` as local
 package imports (so must be run from the repo root), and expects `data/` and `bench-res/` output
 directories to already exist there (they're checked into the repo as empty placeholders).
@@ -61,7 +72,14 @@ by concrete classes, imported via each package's `__init__.py`:
   batches `PodJob`s (name + a `WorkloadAgent` + its kwargs + which GPU resource to request,
   e.g. `nvidia.com/gpu` or a MIG profile like `nvidia.com/mig-1g.10gb`) into one manifest,
   applies it, polls until every pod reaches a terminal phase (or a timeout elapses), then
-  tears down — see `k8s/scheduler.py`'s docstring.
+  tears down — see `k8s/scheduler.py`'s docstring. `PodJob` names are normalized to valid
+  Kubernetes names (`gpu_burn-0` → `gpu-burn-0`). `PowerAwareScheduler` (`k8s/power_scheduler.py`)
+  is the inventory side the GPU Power Model's extender expects but doesn't provide: it publishes
+  node GPU-metadata annotations, rebuilds the node's resident-profiles annotation from bound
+  pods before each submission, submits pods with `schedulerName: power-aware-scheduler` and a
+  solo-profile annotation, and reports the scheduler's decision (bound / PodScheduled=False).
+  Solo profiles come from `monitoring/solo_profile.py`, which rebuilds the model's features from
+  a MonitorWrapper CSV with the same definitions as the model's training extraction.
 - **`workloads/`** — `WorkloadAgent` subclasses (`WorkloadBurn` = gpu-burn stress test,
   `WorkloadBlender`, `WorkloadHpcg`, `WorkloadInferenceLlama`, `WorkloadTrainingYolo`), each
   implementing `pod_spec(**args) -> dict` (image/command/volumes) that `KubernetesScheduler`
@@ -75,9 +93,12 @@ since profiles are already exposed by the device plugin once `mig.sh create` has
 each condition builds a batch of `PodJob`s and hands them to `KubernetesScheduler.run()`, which
 blocks until they finish before the script moves to the next condition.
 
-`init/` holds shell scripts (`setup.sh`, `k8s.sh`, `build-images.sh`, `mig.sh`) and Dockerfiles
-for provisioning a Lambda.ai host and its benchmark images (`init/bench/<name>/`) — not Python,
+`init/` holds shell scripts (`setup.sh`, `k8s.sh`, `minikube-gpu.sh`, `build-images.sh`,
+`mig.sh`, `power-scheduler.sh` + `power-scheduler/scheduler.yaml`) and Dockerfiles for
+provisioning a Lambda.ai host and its benchmark images (`init/bench/<name>/`) — not Python,
 not imported by the experiment scripts, just setup tooling referenced from the root `README.md`.
+`power-scheduler.sh` builds/deploys the extender from `$GPU_POWER_MODEL_DIR` (default
+`../GPU_Power_Model`, its `deploy/scheduler/`) rather than copying it into this repo.
 
 ### Data flow
 
