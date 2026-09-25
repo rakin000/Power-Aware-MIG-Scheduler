@@ -41,7 +41,9 @@ def sweep_mig_profiles(kubectl_wrapper, scheduler, monitors_wrapper):
 
             # II) Launch `replicas` burn pods each requesting one instance of this MIG profile,
             #     wait for completion, and tear down
-            jobs = [PodJob(name=f'{burn.name}-{i}', workload=burn, kwargs={'delay': DELAY},
+            # mem_use: the workload's 10% default suits time-slicing (pods share one GPU's memory) but
+            # is below gpu_burn's ~768 MB minimum on small MIG instances (1g.5gb -> ~475 MB) and aborts
+            jobs = [PodJob(name=f'{burn.name}-{i}', workload=burn, kwargs={'delay': DELAY, 'mem_use': '90%'},
                             gpu_resource=profile, gpu_count=1) for i in range(replicas)]
             scheduler.run(jobs, timeout=DELAY + 120)
 

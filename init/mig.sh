@@ -33,13 +33,7 @@ destroy_instances() {
 restart_minikube() {
     minikube status >/dev/null 2>&1 || return 0
     minikube stop && minikube start
-    minikube kubectl -- -n kube-system set env daemonset/nvidia-device-plugin-daemonset MIG_STRATEGY=mixed
-    echo "Waiting for nvidia.com/mig-* resources on the node..."
-    for _ in $(seq 60); do
-        minikube kubectl -- get node minikube -o jsonpath='{.status.allocatable}' | grep -q 'nvidia.com/mig-' && break
-        sleep 5
-    done
-    minikube kubectl -- get node minikube -o jsonpath='{.status.allocatable}'; echo
+    "$(dirname "${BASH_SOURCE[0]}")/minikube-gpu.sh"
 }
 
 case "$action" in
