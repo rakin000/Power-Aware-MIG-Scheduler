@@ -67,4 +67,4 @@ if nvidia-smi --query-gpu=mig.mode.current,mig.mode.pending --format=csv,noheade
 fi
 
 # Bring the exporter back
-docker run -d --gpus all --cap-add SYS_ADMIN --name dcgm-exporter --rm -p 9400:9400 "$DCGM_EXPORTER_IMAGE"
+docker run -d --gpus all --cap-add SYS_ADMIN --name dcgm-exporter --rm -p 9400:9400 "$DCGM_EXPORTER_IMAGE" -c 1000  # 1 s refresh, see setup.sh

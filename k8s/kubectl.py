@@ -157,6 +157,46 @@ data:
             if name: phases[name] = phase
         return phases
 
+    def get_object(self, kind: str, name: str, namespace: str = 'default') -> dict:
+        """Full API object (e.g. kind 'pod' or 'node') as a dict, or None if it can't be read."""
+        process = subprocess.run(
+            self.prefix_command + ['get', kind, name, '-n', namespace, '-o', 'json'],
+            text=True,
+            capture_output=True
+        )
+        if process.returncode != 0: return None
+        try:
+            return json.loads(process.stdout)
+        except json.JSONDecodeError:
+            return None
+
+    def list_pods(self, namespace: str = 'default') -> list:
+        """All Pod objects in `namespace`."""
+        process = subprocess.run(
+            self.prefix_command + ['get', 'pods', '-n', namespace, '-o', 'json'],
+            text=True,
+            capture_output=True
+        )
+        if process.returncode != 0:
+            print('Error listing pods:', process.stderr)
+            return []
+        try:
+            return json.loads(process.stdout).get('items', [])
+        except json.JSONDecodeError:
+            return []
+
+    def annotate_node(self, node: str, annotations: dict) -> bool:
+        """Sets (overwrites) string annotations on `node`."""
+        process = subprocess.run(
+            self.prefix_command + ['annotate', 'node', node, '--overwrite']
+            + [f'{key}={value}' for key, value in annotations.items()],
+            text=True,
+            capture_output=True
+        )
+        if process.returncode != 0:
+            print('Error annotating node:', process.stderr)
+        return process.returncode == 0
+
     def get_pod_logs(self, pod_name: str, namespace: str = 'default') -> str:
         process = subprocess.run(
             self.prefix_command + ['logs', pod_name, '-n', namespace],

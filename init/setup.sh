@@ -33,8 +33,10 @@ fi
 
 # The DCGM exporter the monitors scrape on :9400 (needs SYS_ADMIN to see MIG devices).
 # ipmitool is deliberately not installed: VMs have no BMC and the IPMI monitor skips itself.
+# -c 1000: refresh metrics every 1 s (default 30 s), otherwise per-second monitoring reads the same
+# stale value and power variability (the GPU Power Model's power_cv) comes out as 0.
 docker rm -f dcgm-exporter >/dev/null 2>&1 || true
-docker run -d --gpus all --cap-add SYS_ADMIN --name dcgm-exporter --rm -p 9400:9400 "$DCGM_EXPORTER_IMAGE"
+docker run -d --gpus all --cap-add SYS_ADMIN --name dcgm-exporter --rm -p 9400:9400 "$DCGM_EXPORTER_IMAGE" -c 1000
 
 "$HERE/build-images.sh"
 

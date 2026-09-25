@@ -1,0 +1,112 @@
+# Secondary kube-scheduler ("power-aware-scheduler") whose Filter/Prioritize phases call the
+# GPU Power Model's scheduler extender (../GPU_Power_Model/deploy/scheduler, deployed by
+# init/power-scheduler.sh). Pods opt in with `spec.schedulerName: power-aware-scheduler`; the
+# default scheduler and every other pod are untouched.
+# KUBE_SCHEDULER_IMAGE is substituted by init/power-scheduler.sh to match the cluster version.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: power-aware-scheduler
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: power-aware-scheduler-as-kube-scheduler
+subjects:
+  - kind: ServiceAccount
+    name: power-aware-scheduler
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: system:kube-scheduler
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: power-aware-scheduler-as-volume-scheduler
+subjects:
+  - kind: ServiceAccount
+    name: power-aware-scheduler
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: system:volume-scheduler
+  apiGroup: rbac.authorization.k8s.io
+---
+# system:kube-scheduler only grants the default scheduler's own lease/configmap names
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: power-aware-scheduler-extension-apiserver-authentication-reader
+  namespace: kube-system
+subjects:
+  - kind: ServiceAccount
+    name: power-aware-scheduler
+    namespace: kube-system
+roleRef:
+  kind: Role
+  name: extension-apiserver-authentication-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: power-aware-scheduler-config
+  namespace: kube-system
+data:
+  config.yaml: |
+    apiVersion: kubescheduler.config.k8s.io/v1
+    kind: KubeSchedulerConfiguration
+    leaderElection:
+      leaderElect: false
+    profiles:
+      - schedulerName: power-aware-scheduler
+    extenders:
+      - urlPrefix: http://mig-power-extender.mig-power-system.svc
+        filterVerb: filter
+        prioritizeVerb: prioritize
+        weight: 5
+        enableHTTPS: false
+        httpTimeout: 2s
+        nodeCacheCapable: false
+        ignorable: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: power-aware-scheduler
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: power-aware-scheduler
+  template:
+    metadata:
+      labels:
+        app: power-aware-scheduler
+    spec:
+      serviceAccountName: power-aware-scheduler
+      containers:
+        - name: kube-scheduler
+          image: KUBE_SCHEDULER_IMAGE
+          imagePullPolicy: IfNotPresent
+          command:
+            - kube-scheduler
+            - --config=/etc/power-aware-scheduler/config.yaml
+            - --v=2
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 10259
+              scheme: HTTPS
+          volumeMounts:
+            - name: config
+              mountPath: /etc/power-aware-scheduler
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: power-aware-scheduler-config

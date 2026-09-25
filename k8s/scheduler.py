@@ -1,4 +1,4 @@
-import re, time
+import json, re, time
 from dataclasses import dataclass, field
 
 DEFAULT_GPU_RESOURCE = 'nvidia.com/gpu'
@@ -11,12 +11,16 @@ class PodJob:
     MIG experiments (see KubectlWrapper.get_mig_resources() to discover what a node offers).
     `name` is normalized to a valid Pod/container name (RFC 1123 label), e.g. 'gpu_burn-0' ->
     'gpu-burn-0', since workload names like 'gpu_burn' contain characters Kubernetes rejects.
+    `scheduler_name` picks a non-default scheduler (e.g. the power-aware one, k8s/power_scheduler.py)
+    and `annotations` are added to the Pod's metadata as-is (string values).
     """
     name: str
     workload: object              # a WorkloadAgent (workloads/workload_agent.py)
     kwargs: dict = field(default_factory=dict)
     gpu_resource: str = DEFAULT_GPU_RESOURCE
     gpu_count: int = 1
+    scheduler_name: str = None
+    annotations: dict = field(default_factory=dict)
 
     def __post_init__(self):
         self.name = re.sub(r'[^a-z0-9-]+', '-', self.name.lower()).strip('-')[:63]
@@ -87,13 +91,21 @@ class KubernetesScheduler(object):
         if volumes:
             volumes_block = '  volumes:\n' + ''.join(self._volume_yaml(v) for v in volumes)
 
+        # JSON-encoded strings are valid YAML scalars, so values like JSON documents need no escaping
+        annotations_block = ''
+        if job.annotations:
+            annotations_block = '  annotations:\n' + ''.join(
+                f"    {json.dumps(key)}: {json.dumps(str(value))}\n" for key, value in job.annotations.items()
+            )
+        scheduler_block = f'  schedulerName: {job.scheduler_name}\n' if job.scheduler_name else ''
+
         return f"""---
 apiVersion: v1
 kind: Pod
 metadata:
   name: {job.name}
-spec:
-  restartPolicy: Never
+{annotations_block}spec:
+{scheduler_block}  restartPolicy: Never
   containers:
   - name: {job.name}
     image: {spec['image']}
